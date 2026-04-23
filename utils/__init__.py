@@ -1,4 +1,17 @@
 import json
+from aiogram.types import Message
+
+
+class Settings:
+    DEFAULT_SETTINGS = {
+        "min_symbols": -1,
+        "apply_to_media": 1
+    }
+
+    DESCRIPTIONS = {
+        "min_symbols": "Минимальное количество символов в сообщении для добавления текста",
+        "apply_to_media": "Добавлять ли текст к медиафайлам. 0 - нет, 1 - да."
+    }
 
 
 class ChannelsBase:
@@ -8,6 +21,29 @@ class ChannelsBase:
 
     # id(str): user_id(str)
     OWNERS = {}
+
+    # id(str): settings(dict)
+    CHANNEL_SETTINGS = {}
+
+    def apply_to_message(self, message: Message) -> bool:
+        c_id = str(message.chat.id)
+        try:
+            if self.is_disabled(c_id):
+                return False
+            if message.caption is not None:
+                if self.CHANNEL_SETTINGS[c_id]["apply_to_media"] == 0:
+                    return False
+                return len(message.caption) >= self.CHANNEL_SETTINGS[c_id]["min_symbols"]
+            if self.CHANNEL_SETTINGS[c_id]["min_symbols"] > -1:
+                return len(message.text) >= self.CHANNEL_SETTINGS[c_id]["min_symbols"]
+        except Exception as e:
+            pass
+
+        return True
+
+    def set_default_settings(self, id: str) -> None:
+        self.CHANNEL_SETTINGS.update({id: Settings.DEFAULT_SETTINGS})
+        self.to_file()
 
     def is_in_base(self, id: str) -> bool:
         return id in self.BASE
@@ -30,6 +66,7 @@ class ChannelsBase:
 
     def add(self, id: str, text: str, user_id: str) -> None:
         self.BASE.update({id: text})
+        self.set_default_settings(id)
         self.OWNERS.update({id: user_id})
         self.to_file()
 
@@ -40,11 +77,20 @@ class ChannelsBase:
     def get(self, id: str) -> str:
         return self.BASE.get(id)
 
+    def get_settings(self, c_id: str) -> dict:
+        return self.CHANNEL_SETTINGS.get(c_id)
+
     def remove(self, id: str) -> None:
         self.BASE.pop(id)
         self.OWNERS.pop(id)
-        self.DISABLED["disabled"].remove(id)
         self.to_file()
+
+    def set_setting(self, c_id, setting, value):
+        self.CHANNEL_SETTINGS[c_id][setting] = value
+        self.to_file()
+
+    def get_all_users_channels(self, u_id: str) -> list:
+        return [[k, v] for k, v in self.BASE.items() if self.OWNERS.get(k) == u_id]
 
     def from_file(self) -> None:
         with open("./channels.json", "r", encoding='utf-8') as f:
@@ -56,6 +102,13 @@ class ChannelsBase:
         with open("./owners.json", "r", encoding='utf-8') as f:
             self.OWNERS = json.load(f)
 
+        with open("./settings.json", "r", encoding='utf-8') as f:
+            self.CHANNEL_SETTINGS = json.load(f)
+
+        for i in self.BASE:
+            if i not in self.CHANNEL_SETTINGS:
+                self.CHANNEL_SETTINGS[i] = Settings.DEFAULT_SETTINGS
+
     def to_file(self) -> None:
         with open("./channels.json", "w", encoding='utf-8') as f:
             json.dump(self.BASE, f)
@@ -65,6 +118,9 @@ class ChannelsBase:
 
         with open("./owners.json", "w", encoding='utf-8') as f:
             json.dump(self.OWNERS, f)
+
+        with open("./settings.json", "w", encoding='utf-8') as f:
+            json.dump(self.CHANNEL_SETTINGS, f)
 
 
 class UsersBase:
@@ -106,3 +162,4 @@ class UsersBase:
     def to_file(self) -> None:
         with open("./users.json", "w", encoding='utf-8') as f:
             json.dump(self.USERS, f)
+

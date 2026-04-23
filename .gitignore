@@ -1,1 +1,7 @@
+/.idea
 .env
+channels.json
+disabled.json
+owners.json
+users.json
+settings.json
