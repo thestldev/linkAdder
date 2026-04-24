@@ -116,7 +116,7 @@ async def list_(message: types.Message):
     for ch_id, text in cb.BASE.items():
         clean_text = text.replace('\n', ' ')[:50]  # Короткое превью
         report.append(
-            f"• <code>{repl_ch_id_into_title_if_can(ch_id)}</code>: <blockquote expandable>{text.strip()}</blockquote>")
+            f"• <code>{repl_ch_id_into_title_if_can(ch_id)}</code>: <blockquote expandable>{text.strip()}</blockquote> • <a href='tg://user?id={cb.OWNERS[ch_id]}'>Админ</a>")
 
     # 2. Настройки (с фиксом юникода в вариациях)
     report.append("\n<b>⚙️ Настройки и вариации:</b>")
@@ -136,7 +136,19 @@ async def list_(message: types.Message):
 
     # 3. Юзеры и Админы
     report.append("\n<b>👥 Пользователи:</b>")
-    report.append(f"• Админы: <code>{', '.join(ub.get_admins())}</code>")
+    admins = []
+
+    for adm in ub.get_admins():
+        admins.append("tg://user?id=" + adm)
+
+    users = []
+
+    for user in ub.get_users().get('users', []):
+        users.append("tg://user?id=" + user)
+
+    report.append(f"• Пользователи: {', '.join(users)}")
+    report.append(f"• Админы: {', '.join(admins)}")
+
     report.append(f"• Всего юзеров: <code>{len(ub.get_users().get('users', []))}</code>")
 
     # 4. Прочее
