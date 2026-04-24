@@ -1,3 +1,4 @@
+import json
 import re
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -43,7 +44,7 @@ def channel_management_interface(c_id: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Включить/Выключить канал", callback_data=f"toggle_{c_id}"),
         ],
         [
-            InlineKeyboardButton(text="В главное меню(Отменить/Назад)", callback_data="cancel")
+            InlineKeyboardButton(text="< К каналам", callback_data=f"my_page_0")
         ]
     ]
 
@@ -57,10 +58,10 @@ def my_channels(c_list: list[str], page, pages) -> InlineKeyboardMarkup:
         text = re.sub(r'<[^>]+>', '', i[1])
         kb.append([InlineKeyboardButton(text=text, callback_data=f"c_{i[0]}")])
 
-    if (page+1) < pages:
-        kb.append([InlineKeyboardButton(text=f"{page+1}/{pages} >", callback_data=f"my_page_{page+1}")])
+    if (page + 1) < pages:
+        kb.append([InlineKeyboardButton(text=f"{page + 1}/{pages} >", callback_data=f"my_page_{page + 1}")])
 
-    kb.append([InlineKeyboardButton(text="В главное меню(Отменить/Назад)", callback_data="cancel")])
+    kb.append([InlineKeyboardButton(text="< В главное меню(Отменить/Назад)", callback_data="cancel")])
 
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -68,11 +69,48 @@ def my_channels(c_list: list[str], page, pages) -> InlineKeyboardMarkup:
 def settings_kb(c_id: str, settings: dict) -> InlineKeyboardMarkup:
     kb = []
     for k, v in settings.items():
+        c_v = v
+
+        try:
+            v = json.loads(v)
+        except:
+            v = c_v
+
         kb.append([InlineKeyboardButton(text=f"{k}: {v}", callback_data=f"setting_{c_id}_{k}")])
 
-    kb.append([InlineKeyboardButton(text="В главное меню(Отменить/Назад)", callback_data="cancel")])
+    kb.append([InlineKeyboardButton(text="< К каналу", callback_data=f"c_{c_id}")])
 
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def help_kb() -> InlineKeyboardMarkup:
+    # как добавить канал, где настройки, зачем нужен id, куда писать
+    kb = [
+        [
+            InlineKeyboardButton(text="Как добавить канал?", callback_data="help_add")
+        ],
+        [
+            InlineKeyboardButton(text="Как настроить канал?", callback_data="help_settings")
+        ],
+        [
+            InlineKeyboardButton(text="Зачем нужен id?", callback_data="help_id")
+        ],
+        [
+            InlineKeyboardButton(text="Куда писать за помощью/по прочим вопросам?", callback_data="help_contact")
+        ],
+        [
+            InlineKeyboardButton(text="Как форматировать(оформлять) текст?", callback_data="help_format")
+        ],
+        [
+            InlineKeyboardButton(text="< В главное меню(Отменить/Назад)", callback_data="cancel")
+        ]
+    ]
+
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def back_to_help_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="< Назад", callback_data="help")]])
 
 
 def main_kb() -> InlineKeyboardMarkup:
@@ -82,6 +120,9 @@ def main_kb() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="Мои каналы", callback_data="my_page_0")
+        ],
+        [
+            InlineKeyboardButton(text="Помощь", callback_data="help")
         ],
         [
             InlineKeyboardButton(text="Автор", url="https://t.me/sltmanager")
@@ -96,7 +137,8 @@ def cancel_kb() -> InlineKeyboardMarkup:
 
 
 def back_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="В главное меню(Отменить/Назад)", callback_data="cancel")]])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="< В главное меню(Отменить/Назад)", callback_data="cancel")]])
 
 
 def test():

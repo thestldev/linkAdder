@@ -1,5 +1,6 @@
 import asyncio
 import math
+import random
 import re
 
 from aiogram import Bot, Dispatcher, types, F
@@ -9,7 +10,7 @@ from aiogram.fsm.state import StatesGroup
 from aiogram.fsm import state
 from aiogram.types import CallbackQuery
 
-from config import TOKEN, for_ili_ne_sub
+from config import TOKEN, for_ili_ne_sub, format_rules, HELP
 from ui import *
 from utils import *
 
@@ -42,6 +43,13 @@ class AdminStates(StatesGroup):
 
 class SettingsStates(StatesGroup):
     cur_setting_id = state.State()
+
+
+def repl_ch_id_into_title_if_can(ch_id: str) -> str:
+    if ch_id in cb.TITLES:
+        return cb.TITLES[ch_id]
+    else:
+        return ch_id
 
 
 @dp.message(Command("grant"))
@@ -101,17 +109,58 @@ async def list_(message: types.Message):
         await message.answer("Вы не администратор", reply_markup=back_kb())
         return
 
-    await message.answer(f"Пользователи: {ub.get_users()}")
-    await message.answer(f"Админы: {ub.get_admins()}")
-    await message.answer(f"Каналы: {cb.BASE}")
-    await message.answer(f"Отключенные каналы: {cb.DISABLED}")
-    await message.answer(f"Владельцы каналов: {cb.OWNERS}")
+        # Собираем основной отчет
+    report = ["<b>📊 ОТЧЕТ ПО БАЗЕ ДАННЫХ</b>\n", "<b>📢 Каналы и подписи:</b>"]
+
+    # 1. Каналы и их подписи
+    for ch_id, text in cb.BASE.items():
+        clean_text = text.replace('\n', ' ')[:50]  # Короткое превью
+        report.append(
+            f"• <code>{repl_ch_id_into_title_if_can(ch_id)}</code>: <blockquote expandable>{text.strip()}</blockquote>")
+
+    # 2. Настройки (с фиксом юникода в вариациях)
+    report.append("\n<b>⚙️ Настройки и вариации:</b>")
+    for ch_id, settings in cb.CHANNEL_SETTINGS.items():
+        var_info = "нет"
+        if 'variations' in settings:
+            try:
+                # Декодируем ту самую "залупу" из JSON
+                v_data = json.loads(settings['variations'])
+                var_info = ", ".join(v_data.get('variations', []))
+            except:
+                var_info = "ошибка парсинга"
+
+        report.append(f"• <code>{repl_ch_id_into_title_if_can(ch_id)}</code>:")
+        report.append(
+            f"<blockquote expandable>Мин. символов: {settings.get('min_symbols')}\nМедиа: {settings.get('apply_to_media')}\nВариации: {var_info}</blockquote>")
+
+    # 3. Юзеры и Админы
+    report.append("\n<b>👥 Пользователи:</b>")
+    report.append(f"• Админы: <code>{', '.join(ub.get_admins())}</code>")
+    report.append(f"• Всего юзеров: <code>{len(ub.get_users().get('users', []))}</code>")
+
+    # 4. Прочее
+    disabled = cb.DISABLED.get('disabled', [])
+    report.append(f"\n<b>🚫 Отключено:</b> {len(disabled)} каналов")
+    if disabled:
+        report.append(f"<blockquote>{', '.join(disabled)}</blockquote>")
+
+    # Отправляем одним или несколькими сообщениями (если отчет слишком длинный)
+    final_text = "\n".join(report)
+
+    # Разбиваем на части по 4000 символов, если база разрослась
+    if len(final_text) > 4096:
+        for x in range(0, len(final_text), 4000):
+            await message.answer(final_text[x:x + 4000], parse_mode="HTML", reply_markup=back_kb(),
+                                 disable_web_page_preview=True)
+    else:
+        await message.answer(final_text, parse_mode="HTML", reply_markup=back_kb(), disable_web_page_preview=True)
 
 
 @dp.message(Command("broadcast"))
 async def broadcast(message: types.Message, state: FSMContext):
     if not ub.is_admin(str(message.chat.id)):
-        await message.answer("Вы не администратор")
+        await message.answer("Вы не администратор", reply_markup=back_kb())
         return
 
     await message.answer("Пришлите текст", reply_markup=cancel_kb())
@@ -192,14 +241,25 @@ async def remove_title(message: types.Message, state: FSMContext):
 async def change(message: types.Message, state: FSMContext):
     await message.answer(
         "Пришлите ID канала, текст для которого Вы хотите изменить. Его вам написало при добавлении(это обычный ID "
-        "телеграма)")
+        "телеграма)", reply_markup=cancel_kb())
     await state.set_state(States.change_id)
 
 
 @dp.callback_query(F.data.startswith("edit_"))
 async def edit_(call: CallbackQuery, state: FSMContext):
     c_id = call.data.split("_")[-1]
-    await call.message.edit_text("Пришлите текст на который хотите изменить")
+
+    await call.message.edit_text("Пришлите текст на который изменить."
+                                 "\nПравила форматирования:"
+                                 f"<blockquote expandable>{format_rules}</blockquote>",
+                                 parse_mode="HTML",
+                                 reply_markup=InlineKeyboardMarkup(
+                                     inline_keyboard=[
+                                         [
+                                             InlineKeyboardButton(text="< К каналу", callback_data=f"c_{c_id}")
+                                         ]
+                                     ]
+                                 ))
     await state.update_data(id=c_id)
     await state.set_state(States.change_text)
 
@@ -207,19 +267,22 @@ async def edit_(call: CallbackQuery, state: FSMContext):
 @dp.message(States.change_id)
 async def change_title(message: types.Message, state: FSMContext):
     if not message.text.replace("-", "").isdigit():
-        await message.answer("Пришлите настоящий ID канала.")
+        await message.answer("Пришлите настоящий ID канала.", reply_markup=back_kb())
         return
 
     if cb.is_in_base(str(message.text)):
         if not cb.is_owner(str(message.text), str(message.from_user.id)):
-            await message.answer("Вы не владеете этим каналом")
+            await message.answer("Вы не владеете этим каналом", reply_markup=back_kb())
             return
 
-        await message.answer("Пришлите текст на который изменить")
+        await message.answer("Пришлите текст на который изменить."
+                             "\nПравила форматирования:"
+                             f"<blockquote expandable>{format_rules}</blockquote>",
+                             parse_mode="HTML")
         await state.update_data(id=message.text)
         await state.set_state(States.change_text)
     else:
-        await message.answer("Такого канала нет")
+        await message.answer("Такого канала нет", reply_markup=back_kb())
 
 
 @dp.message(States.change_text)
@@ -229,7 +292,8 @@ async def change_text(message: types.Message, state: FSMContext):
     cb.update(str(data["id"]), ("" if message.text.endswith("--no-empty-line") else "\n\n") + message.html_text
               .replace("--no-empty-line", "")
               .strip())
-    await message.answer("Текст изменен на " + message.html_text, parse_mode="HTML", disable_web_page_preview=True)
+    await message.answer("Текст изменен на " + message.html_text, parse_mode="HTML", disable_web_page_preview=True,
+                         reply_markup=back_kb())
     await state.clear()
 
 
@@ -285,12 +349,11 @@ async def toggle_title(message: types.Message, state: FSMContext):
 
 @dp.message(States.title)
 async def title(message: types.Message, state: FSMContext):
-    await message.answer("""
+    await message.answer(f"""
 Пришлите текст, который будет указываться в конце поста.
 Можно использовать любое форматирование.
 
-ЕСЛИ ВЫ НЕ ХОТИТЕ ПУСТУЮ СТРОКУ - ДОБАВЬТЕ В КОНЕЦ СООБЩЕНИЯ --no-empty-line
-Если хотите пробел(ы) в начале - укажите вместо каждого пробела $space """, reply_markup=cancel_kb())
+{format_rules}""", reply_markup=cancel_kb())
     await state.update_data(title=message.text)
     await state.set_state(States.text)
 
@@ -302,23 +365,30 @@ async def text(message: types.Message, state: FSMContext):
 
     json_data = {
         data["title"]: {
-            "text": ("" if data["text"].endswith("--no-empty-line") else "\n\n") + data["text"]
-            .replace("--no-empty-line", "")
-            .replace("$space", " ")
-            .strip(),
+            "text": process_text(data["text"]),
             "u_id": message.chat.id
         }
     }
 
     query.update(json_data)
-    await message.answer("Напишите что-либо в канал и он добавится(Напишите 2 сообщения. второе для проверки)")
+    await message.answer("Напишите что-либо в канал и он добавится.")
     await state.clear()
 
 
 @dp.channel_post()
 async def channel_post_handler(message: types.Message):
     if cb.is_in_base(str(message.chat.id)) and cb.apply_to_message(message):
-        await edit_me(message, cb.BASE[str(message.chat.id)])
+        to = cb.BASE[str(message.chat.id)]
+
+        if cb.get_settings(str(message.chat.id))["variations"] != "":
+            variations = json.loads(cb.get_settings(str(message.chat.id))["variations"])["variations"]
+            variations.append(to)
+
+            to = random.choice(variations)
+
+            await edit_me(message, to)
+        else:
+            await edit_me(message, to)
 
     elif message.chat.title in query:
         q_out = query[message.chat.title]
@@ -326,8 +396,8 @@ async def channel_post_handler(message: types.Message):
         cb.add(str(message.chat.id), str(q_out["text"]), str(q_out["u_id"]))
         await bot.send_message(
             q_out["u_id"],
-            f"Канал {message.chat.title} добавлен в базу.\n"
-            f"ID вашего канала(понадобится при удалении из базы/изменении текста): {str(message.chat.id)}\n"
+            f"Канал <code>{message.chat.title}</code> добавлен в базу.\n"
+            f"ID вашего канала(понадобится при удалении из базы/изменении текста): <code>{str(message.chat.id)}</code>\n"
             f"Текст: {q_out['text']}",
             parse_mode="HTML",
             reply_markup=back_kb(),
@@ -335,40 +405,63 @@ async def channel_post_handler(message: types.Message):
         )
         # print(cb.BASE)
         query.pop(message.chat.title)
+        await edit_me(message, cb.BASE[str(message.chat.id)])
 
 
 async def edit_me(message: types.Message, to: str):
-    find = to
-    if to.__contains__("<a>") or to.__contains__("</a>"):
-        find = re.sub(r'<[^>]+>', '', to)
-    content = message.html_text or message.caption or ""
+    btn_match = re.search(r'--button:(\S+)', to)
+    button_link = btn_match.group(1) if btn_match else ""
 
-    if not content.endswith(find):
-        new_text = content + to
+    to_clean = re.sub(r'--button:\S+', '', to)
+    do_text = "--no-text" not in to_clean
+    to_clean = to_clean.replace("--no-text", "")
 
-        try:
-            if message.text:
-                await message.edit_text(
-                    text=new_text,
-                    parse_mode="HTML",
-                    disable_web_page_preview=True,
-                    entities=message.entities
-                )
-            else:
-                await message.edit_caption(
-                    caption=new_text,
-                    parse_mode="HTML",
-                    entities=message.caption_entities
-                )
-        except Exception as e:
-            pass
+    find = re.sub(r'<[^>]+>', '', to_clean).strip()
+
+    content_html = message.html_text or message.caption or ""
+
+    new_text_html = (content_html + to_clean) if do_text else content_html
+    if content_html.endswith(to_clean) and not button_link:
+        return
+
+    try:
+        kb = None
+        if button_link:
+            btn_text = to_clean  # if not do_text else "Перейти"
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=btn_text, url=button_link)]
+            ])
+
+        if message.text:
+            await message.edit_text(
+                text=new_text_html,
+                parse_mode="HTML",
+                reply_markup=kb,
+                disable_web_page_preview=True
+            )
+        else:
+            await message.edit_caption(
+                caption=new_text_html,
+                parse_mode="HTML",
+                reply_markup=kb
+            )
+
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 @dp.callback_query(F.data.startswith("my_page_"))
 async def fetch_my_channels(call: CallbackQuery):
     page = int(call.data.split("_")[-1])
 
-    channels = cb.get_all_users_channels(str(call.from_user.id))
+    channels_id = cb.get_all_users_channels(str(call.from_user.id))
+
+    channels = []
+    for i in channels_id:
+        if i[0] in cb.TITLES:
+            channels.append([i[0], cb.TITLES[i[0]]])
+        else:
+            channels.append(i)
 
     if not channels:
         return await call.message.edit_text("У вас нет каналов", reply_markup=back_kb())
@@ -409,10 +502,18 @@ async def view_settings(call: CallbackQuery, state: FSMContext):
 async def change_setting(call: CallbackQuery, state: FSMContext):
     c_id = call.data.split("_")[1]
     setting = call.data.replace(f"setting_{c_id}_", "")
+    value = cb.get_settings(c_id)[setting]
+    c_v = value
+
+    try:
+        value = json.loads(value)
+    except:
+        value = c_v
 
     await call.message.edit_text(
-        f"Изменение настройки {setting} со значением {cb.get_settings(c_id)[setting]}. Напишите новое значение. "
+        f"Изменение настройки {setting} со значением {value}. Напишите новое значение. "
         f"\nОписание настройки: {Settings.DESCRIPTIONS[setting]}",
+        reply_markup=back_kb()
     )
     await state.set_state(SettingsStates.cur_setting_id)
     await state.update_data(c_id=c_id, setting=setting)
@@ -420,16 +521,41 @@ async def change_setting(call: CallbackQuery, state: FSMContext):
 
 @dp.message(SettingsStates.cur_setting_id)
 async def change_setting_value(message: types.Message, state: FSMContext):
-    if not message.text.isnumeric():
-        return await message.answer("Нужно ввести число!")
-
     c_id = (await state.get_data())["c_id"]
     setting = (await state.get_data())["setting"]
 
-    cb.set_setting(c_id, setting, int(message.text))
+    try:
+        typed = Settings.TYPES[setting](message.html_text)
 
-    await message.answer("Настройка изменена!", reply_markup=settings_kb(c_id, cb.get_settings(c_id)))
-    await state.clear()
+        end = typed
+
+        if setting == "variations" and message.html_text != "$NO-VARIATIONS":
+            lines = message.html_text.split("\n")
+
+            end = {
+                "variations": []
+            }
+
+            for i in lines:
+                if not i:
+                    continue
+                end["variations"].append(process_text(i))
+
+            end = json.dumps(end)
+        elif setting == "variations" and message.html_text == "$NO-VARIATIONS":
+            end = ""
+
+        cb.set_setting(c_id, setting, end)
+
+        # print(f"all settings: {cb.get_settings(c_id)}")
+        # print(f"typed: {typed}")
+        # print(f"end: {end}")
+
+        await message.answer("Настройка изменена!", reply_markup=settings_kb(c_id, cb.get_settings(c_id)))
+        await state.clear()
+
+    except TypeError:
+        return await message.answer("Некорректное значение! Введите еще раз.", reply_markup=back_kb())
 
 
 @dp.callback_query(F.data.startswith("c_"))
@@ -437,7 +563,8 @@ async def manage(call: CallbackQuery):
     c_id = call.data.split("_")[-1]
 
     await call.message.edit_text(
-        "Канал: " + cb.BASE[c_id],
+        "Канал: \n\n" + repl_ch_id_into_title_if_can(c_id).strip(),
+        parse_mode="HTML",
         reply_markup=channel_management_interface(c_id)
     )
 
@@ -448,6 +575,18 @@ async def cancel(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text("Главное меню!", reply_markup=main_kb())
 
 
+@dp.callback_query(F.data == "help")
+async def help(call: CallbackQuery):
+    await call.message.edit_text("Помощь", reply_markup=help_kb())
+
+
+@dp.callback_query(F.data.startswith("help_"))
+async def help_page(call: CallbackQuery):
+    help_text = HELP[call.data.split("_")[1]]
+
+    await call.message.edit_text(help_text, parse_mode="HTML", reply_markup=back_to_help_kb())
+
+
 @dp.message(Command("start"))
 async def start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -455,10 +594,15 @@ async def start(message: types.Message, state: FSMContext):
     # await message.answer("Чтобы добавить свой канал /add\nУдалить - /remove\nИзменить текст - /change\nВременно "
     #                      "отключить/включить - /toggle")
 
-    await message.answer("Главное меню!", reply_markup=main_kb())
-
     if not ub.is_in_base(str(message.chat.id)):
         ub.add(str(message.chat.id))
+
+        return await message.answer("Главное меню!"
+                                    "\n\nЭто будет написано один раз:"
+                                    "используя бот, вы даете согласие на сбор "
+                                    "данных для аналитики и отладки(иначе бот будет баганным)", reply_markup=main_kb())
+
+    await message.answer("Главное меню!", reply_markup=main_kb())
 
 
 if __name__ == "__main__":
