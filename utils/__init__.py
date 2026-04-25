@@ -5,12 +5,21 @@ from aiogram.types import Message
 class Settings:
     DEFAULT_SETTINGS = {
         "min_symbols": -1,
-        "apply_to_media": 1
+        "apply_to_media": 1,
+        "variations": ""
     }
 
     DESCRIPTIONS = {
         "min_symbols": "Минимальное количество символов в сообщении для добавления текста",
-        "apply_to_media": "Добавлять ли текст к медиафайлам. 0 - нет, 1 - да."
+        "apply_to_media": "Добавлять ли текст к медиафайлам. 0 - нет, 1 - да.",
+        "variations": "Вариации текста для добавления. Пишите их каждую на отдельной строке. "
+                      "!! Чтобы убрать вариации - $NO-VARIATIONS"
+    }
+
+    TYPES = {
+        "min_symbols": int,
+        "apply_to_media": int,
+        "variations": str
     }
 
 
@@ -18,6 +27,8 @@ class ChannelsBase:
     # id(str): text(str)
     BASE = {}
     DISABLED = {"disabled": []}
+    # id(str): title(str)
+    TITLES = {}
 
     # id(str): user_id(str)
     OWNERS = {}
@@ -27,6 +38,10 @@ class ChannelsBase:
 
     def apply_to_message(self, message: Message) -> bool:
         c_id = str(message.chat.id)
+
+        if c_id not in self.TITLES:
+            self.TITLES.update({c_id: message.chat.title})
+
         try:
             if self.is_disabled(c_id):
                 return False
@@ -93,17 +108,45 @@ class ChannelsBase:
         return [[k, v] for k, v in self.BASE.items() if self.OWNERS.get(k) == u_id]
 
     def from_file(self) -> None:
-        with open("./channels.json", "r", encoding='utf-8') as f:
-            self.BASE = json.load(f)
+        try:
+            with open("./channels.json", "r", encoding='utf-8') as f:
+                self.BASE = json.load(f)
+        except FileNotFoundError as e:
+            self.BASE = {}
+            with open("./channels.json", "w", encoding='utf-8') as f:
+                json.dump(self.BASE, f)
 
-        with open("./disabled.json", "r", encoding='utf-8') as f:
-            self.DISABLED = json.load(f)
+        try:
+            with open("./disabled.json", "r", encoding='utf-8') as f:
+                self.DISABLED = json.load(f)
+        except FileNotFoundError as e:
+            self.DISABLED = {"disabled": []}
+            with open("./disabled.json", "w", encoding='utf-8') as f:
+                json.dump(self.DISABLED, f)
 
-        with open("./owners.json", "r", encoding='utf-8') as f:
-            self.OWNERS = json.load(f)
+        try:
+            with open("./owners.json", "r", encoding='utf-8') as f:
+                self.OWNERS = json.load(f)
+        except FileNotFoundError as e:
+            self.OWNERS = {}
+            with open("./owners.json", "w", encoding='utf-8') as f:
+                json.dump(self.OWNERS, f)
 
-        with open("./settings.json", "r", encoding='utf-8') as f:
-            self.CHANNEL_SETTINGS = json.load(f)
+        try:
+            with open("./settings.json", "r", encoding='utf-8') as f:
+                self.CHANNEL_SETTINGS = json.load(f)
+        except FileNotFoundError as e:
+            self.CHANNEL_SETTINGS = {}
+            with open("./settings.json", "w", encoding='utf-8') as f:
+                json.dump(self.CHANNEL_SETTINGS, f)
+
+        try:
+            with open("./titles.json", "r", encoding='utf-8') as f:
+                self.TITLES = json.load(f)
+        except FileNotFoundError as e:
+            self.TITLES = {}
+            with open("./titles.json", "w", encoding='utf-8') as f:
+                json.dump(self.TITLES, f)
 
         for i in self.BASE:
             if i not in self.CHANNEL_SETTINGS:
@@ -121,6 +164,9 @@ class ChannelsBase:
 
         with open("./settings.json", "w", encoding='utf-8') as f:
             json.dump(self.CHANNEL_SETTINGS, f)
+
+        with open("./titles.json", "w", encoding='utf-8') as f:
+            json.dump(self.TITLES, f)
 
 
 class UsersBase:
@@ -156,10 +202,21 @@ class UsersBase:
         self.to_file()
 
     def from_file(self) -> None:
-        with open("./users.json", "r", encoding='utf-8') as f:
-            self.USERS = json.load(f)
+        try:
+            with open("./users.json", "r", encoding='utf-8') as f:
+                self.USERS = json.load(f)
+        except FileNotFoundError as e:
+            self.USERS = {"users": [], "admins": []}
+            with open("./users.json", "w", encoding='utf-8') as f:
+                json.dump(self.USERS, f)
 
     def to_file(self) -> None:
         with open("./users.json", "w", encoding='utf-8') as f:
             json.dump(self.USERS, f)
 
+
+def process_text(text: str) -> str:
+    return (("" if text.__contains__("--no-empty-line") else "\n\n") + text
+            .replace("--no-empty-line", "")
+            .replace("$space", " ")
+            .strip())
