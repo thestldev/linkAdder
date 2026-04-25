@@ -14,6 +14,26 @@ from config import TOKEN, for_ili_ne_sub, format_rules, HELP
 from ui import *
 from utils import *
 
+import sys
+
+
+class Logger(object):
+    def __init__(self):
+        self.terminal = sys.stdout
+        self.log = open("console.log", "a", encoding="utf-8")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()
+
+    def flush(self):
+        pass
+
+
+sys.stdout = Logger()
+sys.stderr = sys.stdout
+
 bot = Bot(TOKEN)
 dp = Dispatcher()
 cb = ChannelsBase()
@@ -50,6 +70,19 @@ def repl_ch_id_into_title_if_can(ch_id: str) -> str:
         return cb.TITLES[ch_id]
     else:
         return ch_id
+
+
+@dp.message(Command("log"))
+async def log(message: types.Message):
+    if not ub.is_admin(str(message.chat.id)):
+        await message.answer("Вы не администратор", reply_markup=back_kb())
+        return
+
+    log_file = FSInputFile("console.log")
+    try:
+        await message.answer_document(log_file, caption="📄 Актуальный лог консоли")
+    except Exception as e:
+        await message.answer(f"Ошибка при отправке: {e}")
 
 
 @dp.message(Command("grant"))
@@ -620,4 +653,5 @@ async def start(message: types.Message, state: FSMContext):
 if __name__ == "__main__":
     cb.from_file()
     ub.from_file()
+
     asyncio.run(dp.start_polling(bot))

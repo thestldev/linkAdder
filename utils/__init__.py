@@ -42,6 +42,11 @@ class ChannelsBase:
         if c_id not in self.TITLES:
             self.TITLES.update({c_id: message.chat.title})
 
+        for k, v in Settings.DEFAULT_SETTINGS.items():
+            if k not in self.CHANNEL_SETTINGS[c_id]:
+                self.CHANNEL_SETTINGS[c_id].update({k: v})
+        self.to_file()
+
         try:
             if self.is_disabled(c_id):
                 return False
